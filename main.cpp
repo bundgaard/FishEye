@@ -141,50 +141,41 @@ int main()
                framebuf[(32 + i) + 32 * 64] = left;
            }
    */
-        // NORTHWEST
-        for (int j = 0; j < 32; j++) // move x from 32 to 0
+
+
+        for (int x = 0; x < 32; x++) // move x from 32 to 0
         {
-            for (int i = 0; i < 32; i++) // move y from 32 to zero
+            for (int y = 0; y < 32; y++) // move y from 32 to zero
             {
-                auto left = pixel(map_up_x((streamingRect.x + 32) - j), map_up_y((streamingRect.y + 32) - i));
-                framebuf[(32 - j) + (32 - i) * 64] = left;
-            }
+                // x=cx+rcosθ,y=cy+rsinθ
+                double phi = atan2(y-32,x-32);
+                // std::printf("angle for xy=%d,%d ᵠ=%f\n", x,y, phi * (180.0 / M_PI));
+                // Circle EDGE
+                auto circle_edge_x = 32 + 32 * cos(phi);
+                auto circle_edge_y = 32 + 32 * sin(phi);
+                framebuf[(int)circle_edge_x + (int)circle_edge_y * 64] = 0xff00ff00;
+                std::printf("circle %f,%f\n", std::ceil(circle_edge_x), std::ceil(circle_edge_y));
+                // NORTHWEST
+                int dx = (int)circle_edge_x - x;
+                int dy = (int)circle_edge_y - y ;
+                std::printf("distance x=%d; distance y=%d\n", dx, dy);
+                int distanceSquared = dx * dx + dy * dy;
 
-        }
-        // NORTHEAST
-        for (int j = 0; j < 32; j++) // move x from 32 to 0
-        {
-            for (int i = 0; i < 32; i++) // move y from 32 to zero
-            {
-                auto x_pos = map_up_x((streamingRect.x + 32) + j);
-                auto y_pos = map_up_y((streamingRect.y + 32) - i);
-                auto left = pixel(x_pos, y_pos);
+                if (distanceSquared <32 * 32)
+                {
+                    auto north_west = pixel(map_up_x((streamingRect.x + 32) - x), map_up_y((streamingRect.y + 32) - y));
+                    framebuf[(32 - x) + (32 - y) * 64] = north_west;
+                    // NORTHEAST
+                    auto north_east = pixel(map_up_x((streamingRect.x + 32) + x), map_up_y((streamingRect.y + 32) - y));
+                    framebuf[(32 + x) + (32 - y) * 64] = north_east;
+                    // SOUTHWEST
+                    auto south_west = pixel(map_up_x((streamingRect.x + 32) - x), map_up_y((streamingRect.y + 32) + y));
+                    framebuf[(32 - x) + (32 + y) * 64] = south_west;
+                    // SOUTHEAST
+                    auto south_east = pixel(map_up_x((streamingRect.x + 32) + x), map_up_y((streamingRect.y + 32) + y));
+                    framebuf[(32 + x) + (32 + y) * 64] = south_east;
+                }
 
-
-                framebuf[(32 + j) + (32 - i) * 64] = left;
-            }
-
-        }
-// SOUTHWEST
-        for (int j = 0; j < 32; j++) // move x from 32 to 0
-        {
-            for (int i = 0; i < 32; i++) // move y from 32 to zero
-            {
-                auto left = pixel(map_up_x((streamingRect.x + 32) - j), map_up_y((streamingRect.y + 32) + i));
-
-                framebuf[(32 - j) + (32 + i) * 64] = left;
-            }
-
-        }
-
-
-        // SOUTHEAST
-        for (int j = 0; j < 32; j++) // move x from 32 to 0
-        {
-            for (int i = 0; i < 32; i++) // move y from 32 to zero
-            {
-                auto left = pixel(map_up_x((streamingRect.x + 32) + j), map_up_y((streamingRect.y + 32) + i));
-                framebuf[(32 + j) + (32 + i) * 64] = left;
             }
 
         }
@@ -193,8 +184,8 @@ int main()
         {
             int mid_x = 32;
             int mid_y = 32;
-            int x = mid_x + (31 * std::cos(i));
-            int y = mid_y + (31 * std::sin(i));
+            int x = mid_x + (32 * std::cos(i));
+            int y = mid_y + (32 * std::sin(i));
 
             auto foo = atan2(y, x);
             //    std::printf("foo %f\n", foo);
