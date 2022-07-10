@@ -3,6 +3,8 @@
 #include <SDL2/SDL_image.h>
 #include <array>
 #include <cassert>
+#include <vector>
+#include "Particle.h"
 
 constexpr int StreamingWidth = 64;
 constexpr int StreamingHeight = 64;
@@ -12,34 +14,40 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
+// PixelData will be a vector of a vector so the outer vector is the Y and the inner is the X position.
+
+
+
 int main()
 {
 
     SDL_Init(SDL_INIT_VIDEO);
-    IMG_Init(IMG_INIT_PNG);
+    IMG_Init(IMG_INIT_JPG);
 
 
     auto window = SDL_CreateWindow("FishEye", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 512, 512,
-            /*SDL_WINDOW_FULLSCREEN_DESKTOP*/0);
+            /*SDL_WINDOW_FULLSCREEN_DESKTOP*/SDL_WINDOW_FULLSCREEN_DESKTOP);
     auto renderer = SDL_CreateRenderer(window, 0, SDL_RENDERER_ACCELERATED);
 
     const auto home = std::getenv("HOME");
     std::string filepath(home);
-    filepath += "/Pictures/20201111-assassins-creed-valhalla.png";
+    // filepath += "/Pictures/20201111-assassins-creed-valhalla.png";
+    filepath += "/Pictures/pulp-fiction.jpg";
     std::cout << "Filepath" << filepath << std::endl;
     const auto backgroundSurface = IMG_Load(filepath.c_str());
     const auto backgroundTexture = SDL_CreateTextureFromSurface(renderer, backgroundSurface);
 
 
-    // Example on writing out the pixel data
-    auto *pixels = (Uint32 *) backgroundSurface->pixels;
+    // Use the format and understand each picture if you want to load PNG or JPG, we need to do bit manipulation for each type.
+    auto *pixels = (Uint8 *) backgroundSurface->pixels;
     std::array<uint32_t, 64 * 64> framebuf = {0};
+
     SDL_Texture *streamingTexture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
                                                       StreamingWidth, StreamingHeight);
 
 
     SDL_Rect streamingRect = {.x = 32, .y = 32, .w = StreamingWidth, .h = StreamingHeight};
-
+#pragma region "Lambdas"
     auto map_up_x = [backgroundSurface](int value)
     {
         return map(value, 0, 512, 0, backgroundSurface->w);
@@ -48,7 +56,6 @@ int main()
     {
         return map(value, 0, 512, 0, backgroundSurface->h);
     };
-
     auto map_down_x = [backgroundSurface](int value)
     {
         return map(value, 0, backgroundSurface->w, 0, 512);
@@ -57,11 +64,34 @@ int main()
     {
         return map(value, 0, backgroundSurface->h, 0, 512);
     };
-
     auto to_radian = [](int degree)
     {
         return degree * (M_PI / 180.0);
     };
+    auto pixel = [pixels, backgroundSurface](long x, long y)
+    {
+        auto color = pixels[x + y * backgroundSurface->w];
+        SDL_Color color_s;
+        SDL_GetRGBA(color, backgroundSurface->format, &color_s.r, &color_s.g, &color_s.b, &color_s.a);
+        // std::printf("Pixel format %s\n", SDL_GetPixelFormatName(backgroundSurface->format->format));
+        if (backgroundSurface->format->format == SDL_PIXELFORMAT_RGB24)
+        {
+            return SDL_MapRGB(backgroundSurface->format, color_s.r, color_s.g, color_s.b);
+        }
+        return (Uint32) (color_s.a << 24 | color_s.r << 16 | color_s.g << 8 | color_s.b);
+    };
+    auto calculateRelativeBrightness = [](SDL_Color &color)
+    {
+        auto value = std::sqrt(
+                (color.r * color.r) * 0.299 +
+                (color.g * color.g) * 0.587 +
+                (color.b * color.b) * 0.114
+        );
+        return value;
+    };
+
+#pragma endregion
+
     int dx = -1;
     int dy = 1;
     bool quit = false;
@@ -75,6 +105,51 @@ int main()
             framebuf[index] = 0x00ffffff;
         }
     }
+
+    std::vector<Particle> particles;
+    for (auto i = 0; i < 5000; i++)
+    {
+        particles.emplace_back(512, 512);
+    }
+
+
+    std::printf("Image dimension %d,%d\n", backgroundSurface->w, backgroundSurface->h);
+    std::printf("Bytes per pixel %d\n", backgroundSurface->format->BytesPerPixel);
+    std::printf("Bits  per pixel %d\n", backgroundSurface->format->BitsPerPixel);
+    std::printf("Row size %d %d\n", backgroundSurface->pitch,
+                backgroundSurface->pitch / backgroundSurface->format->BytesPerPixel);
+    std::printf("Pixels in image %d\n", backgroundSurface->w * backgroundSurface->h);
+
+    std::vector<std::vector<PixelData>> mappedPixels;
+    for (auto y = 0; y < backgroundSurface->h; y++)
+    {
+        std::vector<PixelData> row;
+        for (auto x = 0; x < backgroundSurface->w; x++)
+        {
+            SDL_Color color;
+                auto index = (y * backgroundSurface->pitch) + (x * backgroundSurface->format->BytesPerPixel);
+            auto red = pixels[index];
+            auto green = pixels[index+1];
+            auto blue = pixels[index+2];
+
+            Uint32 dot = red << 24 | green << 16 | blue << 8 | 255;
+            color.r = red;
+            color.g = green;
+            color.b = blue;
+            PixelData pd = {
+                    .brightness = calculateRelativeBrightness(color),
+                    .color = color,
+                    .dot = dot,
+            };
+
+            row.push_back(pd);
+        }
+        mappedPixels.push_back(row);
+    }
+
+    std::printf("Mapped pixels %zu,%zu\n", mappedPixels.size(), mappedPixels[0].size());
+    std::printf("mapped pixel brightness %f\n", mappedPixels[0][0].brightness);
+
 
     while (!quit)
     {
@@ -93,166 +168,31 @@ int main()
         }
 
 
-        long ypos = map_up_y(255);
-
-        long xpos = map_up_x(255);
-
-        /*for (long y = ypos; y < ypos + StreamingHeight; y++)
-        {
-            for (long x = xpos; x < xpos + StreamingWidth; x++)
-            {
-                auto pixel = pixels[x + y * backgroundSurface->w];
-
-                Uint8 red, green, blue, alpha;
-                SDL_GetRGBA(pixel, backgroundSurface->format, &red, &green, &blue, &alpha);
-                // std::printf("scale=%d,%d, pixel=%x, color=%d,%d,%d\n", x, y,pixel, red, green, blue);
-                // AA RR GG BB
-
-                long index = map_down_x(x) + map_down_y(y) * 64;
-                long center_index = 32 + 32 * 64;
-                long new_y = center_index + (64.0 * std::sin(20 * 3.14576 * 2 * 50 + y));
-                long new_x = center_index + (64.0 * std::cos(20 * 3.14576 * 2 * 50 + x));
-                new_y = map_down_y(new_y);
-                new_x = map_down_x(new_x);
-            //    std::printf("index %d, new %d,%d\n", index, new_x, new_y);
-                // framebuf[(x - xpos)+ (new_y - ypos) * 64] = 0xffff1111;//alpha << 24 | red << 16 | green << 8 | blue;
-                // framebuf[new_x + new_y * 64] = 0xffff1111;//alpha << 24 | red << 16 | green << 8 | blue;
-
-            }
-        }*/
-
-        auto pixel = [pixels, backgroundSurface](long x, long y)
-        {
-            auto color = pixels[x + y * backgroundSurface->w];
-            SDL_Color color_s;
-            SDL_GetRGBA(color, backgroundSurface->format, &color_s.r, &color_s.g, &color_s.b, &color_s.a);
-            return (Uint32) (color_s.a << 24 | color_s.r << 16 | color_s.g << 8 | color_s.b);
-        };
-
-        /*   for (int i = 0; i < 32; i++)
-           {
-               auto left = pixel(map_up_x(streamingRect.x - i), map_up_y(streamingRect.y));
-               framebuf[(32 - i) + 32 * 64] = left;
-           }
-
-           for (int i = 0; i < 32; i++)
-           {
-               auto left = pixel(map_up_x(streamingRect.x + i), map_up_y(streamingRect.y));
-               framebuf[(32 + i) + 32 * 64] = left;
-           }
-   */
-
-
-        for (int x = 0; x < 32; x++) // move x from 32 to 0
-        {
-            for (int y = 0; y < 32; y++) // move y from 32 to zero
-            {
-                // x=cx+rcosθ,y=cy+rsinθ
-                double phi = atan2(y-32,x-32);
-                // std::printf("angle for xy=%d,%d ᵠ=%f\n", x,y, phi * (180.0 / M_PI));
-                // Circle EDGE
-                auto circle_edge_x = 32 + 32 * cos(phi);
-                auto circle_edge_y = 32 + 32 * sin(phi);
-                framebuf[(int)circle_edge_x + (int)circle_edge_y * 64] = 0xff00ff00;
-                std::printf("circle %f,%f\n", std::ceil(circle_edge_x), std::ceil(circle_edge_y));
-                // NORTHWEST
-                int dx = (int)circle_edge_x - x;
-                int dy = (int)circle_edge_y - y ;
-                std::printf("distance x=%d; distance y=%d\n", dx, dy);
-                int distanceSquared = dx * dx + dy * dy;
-
-                if (distanceSquared <32 * 32)
-                {
-                    auto north_west = pixel(map_up_x((streamingRect.x + 32) - x), map_up_y((streamingRect.y + 32) - y));
-                    framebuf[(32 - x) + (32 - y) * 64] = north_west;
-                    // NORTHEAST
-                    auto north_east = pixel(map_up_x((streamingRect.x + 32) + x), map_up_y((streamingRect.y + 32) - y));
-                    framebuf[(32 + x) + (32 - y) * 64] = north_east;
-                    // SOUTHWEST
-                    auto south_west = pixel(map_up_x((streamingRect.x + 32) - x), map_up_y((streamingRect.y + 32) + y));
-                    framebuf[(32 - x) + (32 + y) * 64] = south_west;
-                    // SOUTHEAST
-                    auto south_east = pixel(map_up_x((streamingRect.x + 32) + x), map_up_y((streamingRect.y + 32) + y));
-                    framebuf[(32 + x) + (32 + y) * 64] = south_east;
-                }
-
-            }
-
-        }
-
-        for (auto i = 0.0; i < M_PI * 2; i += 0.01)
-        {
-            int mid_x = 32;
-            int mid_y = 32;
-            int x = mid_x + (32 * std::cos(i));
-            int y = mid_y + (32 * std::sin(i));
-
-            auto foo = atan2(y, x);
-            //    std::printf("foo %f\n", foo);
-
-            assert((x + y * 64 < 64 * 64));
-            framebuf[x + y * 64] = 0xffff0000;
-        }
-
-        framebuf[32 + 32 * 64] = 0xffffffff; // center dot
-
-        SDL_UpdateTexture(streamingTexture, nullptr, framebuf.data(), StreamingWidth * 4);
-
-        streamingRect.x += dx;
-        streamingRect.y += dy;
-
-
-        // std::printf("rect(%d,%d)\n", streamingRect.x, streamingRect.y);
-        if (streamingRect.x < 0 || streamingRect.x + streamingRect.w > 512)
-        {
-            dx *= -1;
-        }
-        if (streamingRect.y < 0 || streamingRect.y + streamingRect.h > 512)
-        {
-            dy *= -1;
-        }
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+        SDL_SetRenderDrawColor(renderer, 127, 127, 127, 255);
         SDL_RenderClear(renderer);
 
+     //   SDL_RenderCopy(renderer, backgroundTexture, nullptr, nullptr);
+        for (auto y = 0; y < mappedPixels.size(); y++)
+        {
+            for (auto x = 0; x < mappedPixels[y].size(); x++)
+            {
+                PixelData pixel_data = mappedPixels[y][x];
+                auto new_x = std::cos(2 * M_PI * 50 + 220) * x + 50;
+                auto new_y= 200* std::sin(2 * M_PI * 50 + 220) * y + 50;
+                SDL_Rect rect = {.x = (int)new_x, .y = (int)new_y, .w = 1, .h = 1};
+                SDL_SetRenderDrawColor(renderer, pixel_data.brightness, pixel_data.brightness, pixel_data.brightness, pixel_data.brightness);
+                SDL_RenderFillRect(renderer, &rect);
+            }
+        }
 
-        //  SDL_RenderCopy(renderer, backgroundTexture, nullptr, nullptr);
-
-        SDL_RenderCopy(renderer, streamingTexture, nullptr, &streamingRect);
 
         SDL_RenderPresent(renderer);
         SDL_Delay(10);
     }
 
 
-
-    /*
-    std::printf("map x = %ld\n", map_up_x(250));
-    auto y_pos = map_up_y(streamingRect.y);
-    auto x_pos = map_up_x(streamingRect.x);
-    for (long y = y_pos; y < y_pos + StreamingHeight; y++)
-    {
-        for (long x = x_pos; x < x_pos + StreamingWidth; x++)
-        {
-            auto pixel = pixels[x + y * backgroundSurface->w];
-
-            Uint8 red, green, blue, alpha;
-            SDL_GetRGBA(pixel, backgroundSurface->format, &red, &green, &blue, &alpha);
-           // std::printf("scale=%d,%d, pixel=%x, color=%d,%d,%d\n", x, y,pixel, red, green, blue);
-            // AA RR GG BB
-            framebuf[(x - x_pos) + (y - y_pos) * 64] = alpha << 24 | red << 16 | green << 8 | blue;
-
-        }
-    }
-    SDL_UpdateTexture(streamingTexture, nullptr, framebuf.data(), StreamingWidth * 4);
-
-    SDL_RenderCopy(renderer, backgroundTexture, nullptr, nullptr);
-    SDL_RenderCopy(renderer, streamingTexture, nullptr, &streamingRect);
-    SDL_RenderPresent(renderer);
-      SDL_Delay(3000);
-*/
-
-
-
+    SDL_DestroyTexture(backgroundTexture);
+    SDL_DestroyTexture(streamingTexture);
     SDL_FreeSurface(backgroundSurface);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
